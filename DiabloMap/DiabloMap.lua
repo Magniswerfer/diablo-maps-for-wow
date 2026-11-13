@@ -301,10 +301,32 @@ local function refresh()
 end
 
 ------------------------------------------------------------------------------
+-- Default key: Alt-M, set once per character if the key is free and the
+-- toggle has no key yet. If you later unbind or change it, it stays that way.
+------------------------------------------------------------------------------
+
+local DEFAULT_KEY = "ALT-M"
+
+local function setDefaultKey()
+	if db.defaultKeySet or InCombatLockdown() then return end
+	db.defaultKeySet = true
+	if GetBindingKey("DIABLOMAP_TOGGLE") then return end
+	local action = GetBindingAction(DEFAULT_KEY)
+	if action == nil or action == "" then
+		if SetBinding(DEFAULT_KEY, "DIABLOMAP_TOGGLE") then
+			SaveBindings(GetCurrentBindingSet())
+		end
+	else
+		print("|cffc8a050Diablo Map:|r Alt-M is already used for something else. Bind the overlay under Key Bindings > AddOns > Diablo Map.")
+	end
+end
+
+------------------------------------------------------------------------------
 -- Events
 ------------------------------------------------------------------------------
 
 driver:RegisterEvent("ADDON_LOADED")
+driver:RegisterEvent("PLAYER_LOGIN")
 driver:RegisterEvent("PLAYER_ENTERING_WORLD")
 driver:RegisterEvent("ZONE_CHANGED")
 driver:RegisterEvent("ZONE_CHANGED_INDOORS")
@@ -323,6 +345,8 @@ driver:SetScript("OnEvent", function(_, event, arg1)
 		end
 		if not STYLES[db.style] then db.style = DEFAULTS.style end
 		driver:UnregisterEvent("ADDON_LOADED")
+	elseif event == "PLAYER_LOGIN" then
+		setDefaultKey()
 	elseif event == "UI_SCALE_CHANGED" or event == "DISPLAY_SIZE_CHANGED" then
 		if db then applyLayout() end
 	else
@@ -392,10 +416,10 @@ SlashCmdList.DIABLOMAP = function(input)
 	elseif cmd == "group" then
 		db.group = not db.group
 	elseif cmd == "reset" then
-		local shown = db.shown
+		local shown, keySet = db.shown, db.defaultKeySet
 		wipe(db)
 		for k, v in pairs(DEFAULTS) do db[k] = v end
-		db.shown = shown
+		db.shown, db.defaultKeySet = shown, keySet
 		refresh()
 		say("settings reset.")
 	else

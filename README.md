@@ -24,8 +24,10 @@ on the character select AddOns screen.
 
 ## Use
 
-Bind a key under **Options → Keybindings → AddOns → Diablo Map** (Tab, like
-Diablo, works well). There are also zoom in and zoom out bindings.
+Press **Alt-M** to show or hide the overlay. The addon sets that key the first
+time you log in on a character, if Alt-M is not already in use. You can change it
+under **Options → Keybindings → AddOns → Diablo Map**, where there are also zoom
+in and zoom out bindings.
 
 | Command | What it does |
 | --- | --- |
