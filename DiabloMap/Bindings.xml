@@ -1,0 +1,11 @@
+<Bindings>
+	<Binding name="DIABLOMAP_TOGGLE" header="DIABLOMAP" category="ADDONS">
+		DiabloMap_Toggle()
+	</Binding>
+	<Binding name="DIABLOMAP_ZOOMIN" category="ADDONS">
+		DiabloMap_Zoom(1)
+	</Binding>
+	<Binding name="DIABLOMAP_ZOOMOUT" category="ADDONS">
+		DiabloMap_Zoom(-1)
+	</Binding>
+</Bindings>

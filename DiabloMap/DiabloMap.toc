@@ -1,0 +1,9 @@
+## Interface: 120001, 120000, 110207, 50501, 40402, 11508, 11507
+## Title: Diablo Map
+## Notes: A see-through, player-centered map overlay in the style of the Diablo automap.
+## Author: magniswerfer
+## Version: 1.0.0
+## SavedVariables: DiabloMapDB
+
+Bindings.xml
+DiabloMap.lua
