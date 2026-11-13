@@ -11,6 +11,8 @@ BINDING_NAME_DIABLOMAP_ZOOMOUT = "Zoom out"
 
 local DEFAULTS = {
 	shown = false,   -- overlay visible
+	mode = "detail", -- detail (enlarged minimap) | zone (zone map art)
+	detailZoom = 0,  -- minimap zoom level in detail mode (0 = farthest out)
 	alpha = 0.6,     -- overall opacity (0-1)
 	zoom = 1.5,      -- map scale
 	size = 0.8,      -- portion of the screen the overlay may cover (0.2-1)
@@ -189,7 +191,10 @@ end
 -- Layout and per-frame updates
 ------------------------------------------------------------------------------
 
+local applyDetailLayout
+
 local function applyLayout()
+	if applyDetailLayout then applyDetailLayout() end
 	local w, h = UIParent:GetSize()
 	root:SetSize(w * db.size, h * db.size)
 	root:SetAlpha(db.alpha)
@@ -256,6 +261,112 @@ local function updatePlayer()
 	end
 end
 
+------------------------------------------------------------------------------
+-- Detail mode: borrow the game's own minimap, enlarge it into a see-through
+-- square in the middle of the screen, and put it back afterwards.
+------------------------------------------------------------------------------
+
+local hud = CreateFrame("Frame", "DiabloMapHUD", UIParent)
+hud:SetFrameStrata("BACKGROUND")
+hud:SetPoint("CENTER")
+hud:EnableMouse(false)
+hud:Hide()
+
+local saved -- the minimap's original state while we hold it
+
+local function isClutter(child)
+	if child == Minimap.ZoomIn or child == Minimap.ZoomOut or child == Minimap.ZoomHitArea then
+		return true
+	end
+	-- Named children are buttons, borders and addon icons; keep only the
+	-- terrain renderer used in newer zones. Unnamed ones are map pins.
+	local name = child.GetName and child:GetName()
+	return name ~= nil and name ~= "HybridMinimap"
+end
+
+local function maxDetailZoom()
+	return (Minimap.GetZoomLevels and Minimap:GetZoomLevels() or 6) - 1
+end
+
+function applyDetailLayout()
+	local w, h = UIParent:GetSize()
+	local side = math.min(w, h) * db.size
+	hud:SetSize(side, side)
+	if saved then
+		Minimap:SetSize(side, side)
+		Minimap:SetAlpha(db.alpha)
+		db.detailZoom = math.min(db.detailZoom, maxDetailZoom())
+		Minimap:SetZoom(db.detailZoom)
+	end
+end
+
+local function attachMinimap()
+	if not Minimap then return end
+	if saved then
+		-- Something (e.g. Edit Mode) moved it back; take it again.
+		if Minimap:GetParent() ~= hud then
+			Minimap:SetParent(hud)
+			Minimap:ClearAllPoints()
+			Minimap:SetPoint("CENTER", hud, "CENTER")
+		end
+		return
+	end
+	saved = {
+		parent = Minimap:GetParent(),
+		points = {},
+		width = Minimap:GetWidth(),
+		height = Minimap:GetHeight(),
+		scale = Minimap:GetScale(),
+		alpha = Minimap:GetAlpha(),
+		strata = Minimap:GetFrameStrata(),
+		zoom = Minimap:GetZoom(),
+		mouse = Minimap:IsMouseEnabled(),
+		wheel = Minimap:IsMouseWheelEnabled(),
+		hidden = {},
+	}
+	for i = 1, Minimap:GetNumPoints() do
+		saved.points[i] = { Minimap:GetPoint(i) }
+	end
+	for _, child in ipairs({ Minimap:GetChildren() }) do
+		if child:IsShown() and isClutter(child) then
+			child:Hide()
+			saved.hidden[#saved.hidden + 1] = child
+		end
+	end
+
+	Minimap:SetParent(hud)
+	Minimap:ClearAllPoints()
+	Minimap:SetPoint("CENTER", hud, "CENTER")
+	Minimap:SetScale(1)
+	Minimap:SetFrameStrata("BACKGROUND")
+	Minimap:EnableMouse(false)
+	Minimap:EnableMouseWheel(false)
+	applyDetailLayout()
+	hud:Show()
+end
+
+local function detachMinimap()
+	hud:Hide()
+	if not saved then return end
+	local s = saved
+	saved = nil
+	Minimap:SetParent(s.parent)
+	Minimap:ClearAllPoints()
+	for _, point in ipairs(s.points) do
+		Minimap:SetPoint(unpack(point))
+	end
+	Minimap:SetScale(s.scale)
+	Minimap:SetSize(s.width, s.height)
+	Minimap:SetAlpha(s.alpha)
+	Minimap:SetFrameStrata(s.strata)
+	Minimap:SetZoom(s.zoom)
+	Minimap:EnableMouse(s.mouse)
+	Minimap:EnableMouseWheel(s.wheel)
+	for _, child in ipairs(s.hidden) do
+		child:Show()
+	end
+end
+
 local function worldMapOpen()
 	return WorldMapFrame and WorldMapFrame:IsShown()
 end
@@ -264,10 +375,18 @@ local driver = CreateFrame("Frame")
 local mapPollElapsed, groupElapsed = MAP_POLL_INTERVAL, GROUP_INTERVAL
 
 driver:SetScript("OnUpdate", function(_, elapsed)
-	if not db or not db.shown then
+	if not db or not db.shown or worldMapOpen() then
 		if root:IsShown() then root:Hide() end
+		detachMinimap()
 		return
 	end
+
+	if db.mode == "detail" then
+		if root:IsShown() then root:Hide() end
+		attachMinimap()
+		return
+	end
+	detachMinimap()
 
 	mapPollElapsed = mapPollElapsed + elapsed
 	if mapPollElapsed >= MAP_POLL_INTERVAL then
@@ -278,7 +397,7 @@ driver:SetScript("OnUpdate", function(_, elapsed)
 		end
 	end
 
-	if not layer or worldMapOpen() then
+	if not layer then
 		if root:IsShown() then root:Hide() end
 		return
 	end
@@ -327,6 +446,7 @@ end
 
 driver:RegisterEvent("ADDON_LOADED")
 driver:RegisterEvent("PLAYER_LOGIN")
+driver:RegisterEvent("PLAYER_LOGOUT")
 driver:RegisterEvent("PLAYER_ENTERING_WORLD")
 driver:RegisterEvent("ZONE_CHANGED")
 driver:RegisterEvent("ZONE_CHANGED_INDOORS")
@@ -344,7 +464,10 @@ driver:SetScript("OnEvent", function(_, event, arg1)
 			if db[k] == nil then db[k] = v end
 		end
 		if not STYLES[db.style] then db.style = DEFAULTS.style end
+		if db.mode ~= "detail" and db.mode ~= "zone" then db.mode = DEFAULTS.mode end
 		driver:UnregisterEvent("ADDON_LOADED")
+	elseif event == "PLAYER_LOGOUT" then
+		detachMinimap()
 	elseif event == "PLAYER_LOGIN" then
 		setDefaultKey()
 	elseif event == "UI_SCALE_CHANGED" or event == "DISPLAY_SIZE_CHANGED" then
@@ -366,7 +489,11 @@ end
 
 function DiabloMap_Zoom(direction)
 	if not db then return end
-	db.zoom = math.min(MAX_ZOOM, math.max(MIN_ZOOM, db.zoom * (1.25 ^ direction)))
+	if db.mode == "detail" then
+		db.detailZoom = math.min(maxDetailZoom(), math.max(0, db.detailZoom + direction))
+	else
+		db.zoom = math.min(MAX_ZOOM, math.max(MIN_ZOOM, db.zoom * (1.25 ^ direction)))
+	end
 	applyLayout()
 end
 
@@ -380,12 +507,13 @@ end
 
 local HELP = {
 	"/dmap - toggle the overlay",
+	"/dmap mode detail|zone - detailed minimap view or zone map art (now %s)",
 	"/dmap alpha <0-1> - opacity (now %s)",
-	"/dmap zoom <0.4-8> - map scale (now %s)",
+	"/dmap zoom <n> - map scale (now %s); detail mode: 0-5, zone mode: 0.4-8",
 	"/dmap size <0.2-1> - screen area covered (now %s)",
-	"/dmap fog <0-1> - brightness of unexplored areas, 0 hides them (now %s)",
-	"/dmap style color|gray|gold - map colors (now %s)",
-	"/dmap group - show/hide party and raid members (now %s)",
+	"/dmap fog <0-1> - zone mode: brightness of unexplored areas, 0 hides them (now %s)",
+	"/dmap style color|gray|gold - zone mode: map colors (now %s)",
+	"/dmap group - zone mode: show/hide party and raid members (now %s)",
 	"/dmap reset - restore defaults",
 }
 
@@ -401,8 +529,15 @@ SlashCmdList.DIABLOMAP = function(input)
 	elseif cmd == "alpha" and num then
 		db.alpha = clamp(num, 0.05, 1)
 		applyLayout()
+	elseif cmd == "mode" and (arg == "detail" or arg == "zone") then
+		db.mode = arg
+		refresh()
 	elseif cmd == "zoom" and num then
-		db.zoom = clamp(num, MIN_ZOOM, MAX_ZOOM)
+		if db.mode == "detail" then
+			db.detailZoom = clamp(math.floor(num + 0.5), 0, maxDetailZoom())
+		else
+			db.zoom = clamp(num, MIN_ZOOM, MAX_ZOOM)
+		end
 		applyLayout()
 	elseif cmd == "size" and num then
 		db.size = clamp(num, 0.2, 1)
@@ -424,7 +559,7 @@ SlashCmdList.DIABLOMAP = function(input)
 		say("settings reset.")
 	else
 		say("commands:")
-		local values = { nil, db.alpha, db.zoom, db.size, db.fog, db.style, db.group and "on" or "off" }
+		local values = { nil, db.mode, db.alpha, db.mode == "detail" and db.detailZoom or db.zoom, db.size, db.fog, db.style, db.group and "on" or "off" }
 		for i, line in ipairs(HELP) do
 			print("  " .. (values[i] ~= nil and line:format(tostring(values[i])) or line))
 		end
